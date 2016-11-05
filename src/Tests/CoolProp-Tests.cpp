@@ -699,7 +699,7 @@ public:
         State.update(pair, x1, x2);
 
         // Make sure we end up back at the same temperature and pressure we started out with
-		if(State.Q() < 1 && State.Q() > 0) throw CoolProp::ValueError(format("Q [%g K] is between 0 and 1; two-phase solution",State.Q()));
+		if(State.Q() < 1 && State.Q() > 0) throw CoolProp::ValueError(format("Q [%g] is between 0 and 1; two-phase solution",State.Q()));
         if(std::abs(T-State.T()) > 1e-2) throw CoolProp::ValueError(format("Error on T [%Lg K] is greater than 1e-2",std::abs(State.T()-T)));
         if(std::abs(p-State.p())/p*100 > 1e-2)  throw CoolProp::ValueError(format("Error on p [%Lg %%] is greater than 1e-2 %%",std::abs(p-State.p())/p*100));
     }
@@ -780,6 +780,26 @@ TEST_CASE("Test saturation properties for a few fluids", "[saturation],[slow]")
         {
             CAPTURE(pv[i]);
             double T = CoolProp::PropsSI("T","P",pv[i],"Q",0,"CO2");
+        }
+    }
+}
+
+TEST_CASE("Test consistency between Gernert models in CoolProp and Gernert models in REFPROP", "[Gernert]")
+{
+    // See https://groups.google.com/forum/?fromgroups#!topic/catch-forum/mRBKqtTrITU
+    std::string mixes[] = {"CO2[0.7]&Argon[0.3]","CO2[0.7]&Water[0.3]","CO2[0.7]&Nitrogen[0.3]"};
+    for (int i = 0; i < 3; ++i) {
+        const char *ykey = mixes[i].c_str();
+        std::ostringstream ss1;
+        ss1 << mixes[i];
+        SECTION(ss1.str(),""){
+            double Tnbp_CP, Tnbp_RP;
+            CHECK_NOTHROW(Tnbp_CP = PropsSI("T","P",101325,"Q",1,"HEOS::" + mixes[i]));
+            CAPTURE(Tnbp_CP);
+            CHECK_NOTHROW(Tnbp_RP = PropsSI("T","P",101325,"Q",1,"REFPROP::" + mixes[i]));
+            CAPTURE(Tnbp_RP);
+            double diff = std::abs(Tnbp_CP/Tnbp_RP-1);
+            CHECK(diff < 1e-6);
         }
     }
 }

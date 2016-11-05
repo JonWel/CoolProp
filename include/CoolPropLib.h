@@ -115,11 +115,6 @@
      * @returns error_code 1 = Ok 0 = error
      */
     EXPORT_CODE long CONVENTION get_parameter_information_string(const char *key, char *Output, int n);
-    /**
-     * \overload
-     * \sa \ref CoolProp::get_mixture_binary_pair_data
-     */
-    EXPORT_CODE long CONVENTION get_mixture_binary_pair_data(const char *CAS1, const char *CAS2, const char *key);
     /** 
      * \overload
      * \sa \ref CoolProp::get_fluid_param_string
@@ -133,6 +128,30 @@
     * \note you can get the error message by doing something like get_global_param_string("errstring",output)
     */
     EXPORT_CODE void CONVENTION set_config_string(const char * key, const char * val);
+    /** \brief Set configuration numerical value as double
+    * @param key The key to configure
+    * @param val The value to set to the key
+    * \note you can get the error message by doing something like get_global_param_string("errstring",output)
+    */
+    EXPORT_CODE void CONVENTION set_config_double(const char * key, const double val);
+    /** \brief Set configuration value as a boolean
+     * @param key The key to configure
+     * @param val The value to set to the key
+     * \note you can get the error message by doing something like get_global_param_string("errstring",output)
+     */
+    EXPORT_CODE void CONVENTION set_config_bool(const char * key, const bool val);
+    /**
+     * @brief Set the departure functions in the departure function library from a string format
+     * @param string_data The departure functions to be set, either provided as a JSON-formatted string
+     *                    or as a string of the contents of a HMX.BNC file from REFPROP
+     * @param errcode The errorcode that is returned (0 = no error, !0 = error)
+     * @param message_buffer A buffer for the error code
+     * @param buffer_length The length of the buffer for the error code
+     *
+     * @note By default, if a departure function already exists in the library, this is an error,
+     *       unless the configuration variable OVERWRITE_DEPARTURE_FUNCTIONS is set to true
+     */
+    EXPORT_CODE void CONVENTION set_departure_functions(const char * string_data, long *errcode, char *message_buffer, const long buffer_length);
     /**
      * \overload
      * \sa \ref CoolProp::set_reference_stateS
@@ -412,6 +431,21 @@
     */
     EXPORT_CODE void CONVENTION AbstractState_set_binary_interaction_double(const long handle, const long i, const long j, const char* parameter, const double value, long *errcode, char *message_buffer, const long buffer_length);
 
+        /**
+    * @brief Set cubic's alpha function parameters
+    * @param handle The integer handle for the state class stored in memory
+    * @param i indice of the fluid the parramter should be applied too (for mixtures)
+	* @param parameter the string specifying the alpha function to use, ex "TWU" for the TWU alpha function
+    * @param c1 the first parameter for the alpha function
+    * @param c2 the second parameter for the alpha function
+    * @param c3 the third parameter for the alpha function
+    * @param errcode The errorcode that is returned (0 = no error, !0 = error)
+    * @param message_buffer A buffer for the error code
+    * @param buffer_length The length of the buffer for the error code
+    * @return
+    */
+    EXPORT_CODE void CONVENTION  AbstractState_set_cubic_alpha_C(const long handle, const long i, const char* parameter, const double c1, const double c2, const double c3 , long *errcode, char *message_buffer, const long buffer_length);
+
     /**
     * @brief Set some fluid parameter (ie volume translation for cubic)
     * @param handle The integer handle for the state class stored in memory
@@ -424,6 +458,81 @@
     * @return
     */
     EXPORT_CODE void CONVENTION  AbstractState_set_fluid_parameter_double(const long handle, const long i, const char* parameter, const double value, long *errcode, char *message_buffer, const long buffer_length);
+
+    /**
+     * @brief Build the phase envelope
+     * @param handle The integer handle for the state class stored in memory
+     * @param level How much refining of the phase envelope ("none" to skip refining (recommended))
+     * @param errcode The errorcode that is returned (0 = no error, !0 = error)
+     * @param message_buffer A buffer for the error code
+     * @param buffer_length The length of the buffer for the error code
+     * @return
+     *
+     * @note If there is an error in an update call for one of the inputs, no change in the output array will be made
+     */
+    EXPORT_CODE void CONVENTION AbstractState_build_phase_envelope(const long handle, const char *level, long *errcode, char *message_buffer, const long buffer_length);
+
+    /**
+     * @brief Get data from the phase envelope for the given mixture composition
+     * @param handle The integer handle for the state class stored in memory
+     * @param length The number of elements stored in the arrays (both inputs and outputs MUST be the same length)
+     * @param T The pointer to the array of temperature (K)
+     * @param p The pointer to the array of pressure (Pa)
+     * @param rhomolar_vap The pointer to the array of molar density for vapor phase (m^3/mol)
+     * @param rhomolar_liq The pointer to the array of molar density for liquid phase (m^3/mol)
+     * @param x The compositions of the "liquid" phase (WARNING: buffer should be Ncomp*Npoints in length, at a minimum, but there is no way to check buffer length at runtime)
+     * @param y The compositions of the "vapor" phase (WARNING: buffer should be Ncomp*Npoints in length, at a minimum, but there is no way to check buffer length at runtime)
+     * @param errcode The errorcode that is returned (0 = no error, !0 = error)
+     * @param message_buffer A buffer for the error code
+     * @param buffer_length The length of the buffer for the error code
+     * @return
+     *
+     * @note If there is an error in an update call for one of the inputs, no change in the output array will be made
+     */
+    EXPORT_CODE void CONVENTION AbstractState_get_phase_envelope_data(const long handle, const long length, double* T, double* p, double* rhomolar_vap, double *rhomolar_liq, double *x, double *y, long *errcode, char *message_buffer, const long buffer_length);
+
+    /**
+     * @brief Build the spinodal
+     * @param handle The integer handle for the state class stored in memory
+     * @param errcode The errorcode that is returned (0 = no error, !0 = error)
+     * @param message_buffer A buffer for the error code
+     * @param buffer_length The length of the buffer for the error code
+     * @return
+     */
+    EXPORT_CODE void CONVENTION AbstractState_build_spinodal(const long handle, long *errcode, char *message_buffer, const long buffer_length);
+
+    /**
+     * @brief Get data for the spinodal curve
+     * @param handle The integer handle for the state class stored in memory
+     * @param length The number of elements stored in the arrays (all outputs MUST be the same length)
+     * @param tau The pointer to the array of reciprocal reduced temperature
+     * @param delta The pointer to the array of reduced density
+     * @param M1 The pointer to the array of M1 values (when L1=M1=0, critical point)
+     * @param errcode The errorcode that is returned (0 = no error, !0 = error)
+     * @param message_buffer A buffer for the error code
+     * @param buffer_length The length of the buffer for the error code
+     * @return
+     *
+     * @note If there is an error, no change in the output arrays will be made
+     */
+    EXPORT_CODE void CONVENTION AbstractState_get_spinodal_data(const long handle, const long length, double* tau, double* delta, double* M1, long *errcode, char *message_buffer, const long buffer_length);
+
+    /**
+     * @brief Calculate all the critical points for a given composition
+     * @param handle The integer handle for the state class stored in memory
+     * @param length The length of the buffers passed to this function
+     * @param T The pointer to the array of temperature (K)
+     * @param p The pointer to the array of pressure (Pa)
+     * @param rhomolar The pointer to the array of molar density (m^3/mol)
+     * @param stable The pointer to the array of boolean flags for whether the critical point is stable (1) or unstable (0)
+     * @param errcode The errorcode that is returned (0 = no error, !0 = error)
+     * @param message_buffer A buffer for the error code
+     * @param buffer_length The length of the buffer for the error code
+     * @return
+     *
+     * @note If there is an error in an update call for one of the inputs, no change in the output array will be made
+     */
+    EXPORT_CODE void CONVENTION AbstractState_all_critical_points(const long handle, const long length, double *T, double *p, double *rhomolar, long *stable, long *errcode, char *message_buffer, const long buffer_length);
 
     // *************************************************************************************
     // *************************************************************************************
@@ -443,18 +552,7 @@
     /**
     Works just like \ref CoolProp::Props1SI, but units are in KSI system.  This function is deprecated, no longer supported, and users should transition to using the Props1SI function
     */
-    EXPORT_CODE double CONVENTION Props1(const char *FluidName, const char *Output);
-    ///**
-    //\overload
-    // IsFluidType(std::string, std::string)
-    //*/
-    //EXPORT_CODE int CONVENTION IsFluidType(const char *Ref, const char *Type);
-
-    // This version uses the indices in place of the strings for speed.  Get the parameter indices
-    // from get_param_index('D') for instance and the Fluid index from get_Fluid_index('Air') for instance
-    EXPORT_CODE double CONVENTION IPropsSI(long iOutput, long iName1, double Prop1, long iName2, double Prop2, long iFluid);
-    EXPORT_CODE double CONVENTION IProps(long iOutput, long iName1, double Prop1, long iName2, double Prop2, long iFluid);
-    
+    EXPORT_CODE double CONVENTION Props1(const char *FluidName, const char *Output);    
     
     
 #endif

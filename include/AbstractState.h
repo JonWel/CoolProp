@@ -16,6 +16,15 @@
 #include <numeric>
 
 namespace CoolProp {
+    
+/// This structure holds values obtained while tracing the spinodal curve
+/// (most often in the process of finding critical points, but not only)
+class SpinodalData{
+public:
+    std::vector<double> tau,   ///< The reciprocal reduced temperature (\f$\tau=T_r/T\f$)
+                        delta, ///< The reduced density (\f$\delta=\rho/\rho_r\f$)
+                        M1;    ///< The determinant of the scaled matrix for the second criticality condition
+};
 
 /// This simple class holds the values for guesses for use in some solvers
 /// that have the ability to use guess values intelligently
@@ -289,6 +298,8 @@ protected:
     virtual CoolPropDbl calc_p_reducing(void){ throw NotImplementedError("calc_p_reducing is not implemented for this backend"); };
     /// Using this backend, get the critical point molar density in mol/m^3
     virtual CoolPropDbl calc_rhomolar_critical(void){ throw NotImplementedError("calc_rhomolar_critical is not implemented for this backend"); };
+    /// Using this backend, get the critical point mass density in kg/m^3 - Added for IF97Backend which is mass based
+    virtual CoolPropDbl calc_rhomass_critical(void){ throw NotImplementedError("calc_rhomass_critical is not implemented for this backend"); };
     /// Using this backend, get the reducing point molar density in mol/m^3
     virtual CoolPropDbl calc_rhomolar_reducing(void){ throw NotImplementedError("calc_rhomolar_reducing is not implemented for this backend"); };
     /// Using this backend, construct the phase envelope, the variable type describes the type of phase envelope to be built.
@@ -371,6 +382,8 @@ protected:
     virtual void calc_viscosity_contributions(CoolPropDbl &dilute, CoolPropDbl &initial_density, CoolPropDbl &residual, CoolPropDbl &critical){ throw NotImplementedError("calc_viscosity_contributions is not implemented for this backend"); };
     virtual void calc_conductivity_contributions(CoolPropDbl &dilute, CoolPropDbl &initial_density, CoolPropDbl &residual, CoolPropDbl &critical){ throw NotImplementedError("calc_conductivity_contributions is not implemented for this backend"); };
     virtual std::vector<CriticalState> calc_all_critical_points(void){ throw NotImplementedError("calc_all_critical_points is not implemented for this backend"); };
+    virtual void calc_build_spinodal(){ throw NotImplementedError("calc_build_spinodal is not implemented for this backend"); };
+    virtual SpinodalData calc_get_spinodal_data(){ throw NotImplementedError("calc_get_spinodal_data is not implemented for this backend"); };
     virtual void calc_criticality_contour_values(double &L1star, double &M1star){ throw NotImplementedError("calc_criticality_contour_values is not implemented for this backend"); };
     
     /// Convert mass-based input pair to molar-based input pair;  If molar-based, do nothing
@@ -503,8 +516,10 @@ public:
     virtual std::string get_binary_interaction_string(const std::string &CAS1, const std::string &CAS2, const std::string &parameter){ throw NotImplementedError("get_binary_interaction_string is not implemented for this backend"); };
     /// Apply a simple mixing rule (EXPERT USE ONLY!!!)
     virtual void apply_simple_mixing_rule(std::size_t i, std::size_t j, const std::string &model) { throw NotImplementedError("apply_simple_mixing_rule is not implemented for this backend"); };
-    // Set fluid parameter (currently the volume translation parameter for cubic)
-	virtual void set_fluid_parameter_double(const size_t i, const std::string parameter, const double value) { throw ValueError("set_fluid_parameter_double only defined for cubic backends"); };
+    /// Set the cubic alpha function's constants:
+    virtual void set_cubic_alpha_C(const size_t i, const std::string &parameter, const double c1, const double c2, const double c3) { throw ValueError("set_cubic_alpha_C only defined for cubic backends"); };
+    /// Set fluid parameter (currently the volume translation parameter for cubic)
+	virtual void set_fluid_parameter_double(const size_t i, const std::string &parameter, const double value) { throw ValueError("set_fluid_parameter_double only defined for cubic backends"); };
 
     /// Clear all the cached values
     virtual bool clear();
@@ -539,11 +554,17 @@ public:
     double p_critical(void);
     /// Return the critical molar density in mol/m^3
     double rhomolar_critical(void);
-    /// Return the critical molar density in kg/m^3
+    /// Return the critical mass density in kg/m^3
     double rhomass_critical(void);
     
     /// Return the vector of critical points, including points that are unstable or correspond to negative pressure
     std::vector<CriticalState> all_critical_points(void){ return calc_all_critical_points(); };
+    
+    /// Construct the spinodal curve for the mixture (or pure fluid)
+    void build_spinodal(){ calc_build_spinodal(); };
+    
+    /// Get the data from the spinodal curve constructed in the call to build_spinodal()
+    SpinodalData get_spinodal_data(){ return calc_get_spinodal_data(); };
 
     /// Calculate the criticality contour values \f$\mathcal{L}_1^*\f$ and \f$\mathcal{M}_1^*\f$
     void criticality_contour_values(double &L1star, double &M1star){ return calc_criticality_contour_values(L1star, M1star); }

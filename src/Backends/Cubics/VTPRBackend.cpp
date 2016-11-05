@@ -14,6 +14,9 @@ static UNIFAQLibrary::UNIFAQParameterLibrary lib;
 void CoolProp::VTPRBackend::setup(const std::vector<std::string> &names, bool generate_SatL_and_SatV){
 
     R = get_config_double(R_U_CODATA);
+
+    // Set the pure fluid flag
+    is_pure_or_pseudopure = (N == 1);
     
     // Reset the residual Helmholtz energy class
     residual_helmholtz.reset(new CubicResidualHelmholtz(this));
@@ -34,8 +37,8 @@ void CoolProp::VTPRBackend::setup(const std::vector<std::string> &names, bool ge
     // Store the fluid names
     m_fluid_names = names;
     
-    // Resize the vectors
-    resize(names.size());
+    // Set the alpha function for the backend
+    set_alpha_from_components();
     
     // Top-level class can hold copies of the base saturation classes,
     // saturation classes cannot hold copies of the saturation classes
@@ -56,6 +59,45 @@ void CoolProp::VTPRBackend::setup(const std::vector<std::string> &names, bool ge
 			SatV->set_mole_fractions(z);
 		}
     }
+
+    // Resize the vectors (including linked states)
+    resize(names.size());
+}
+
+void CoolProp::VTPRBackend::set_alpha_from_components(){
+    
+    VTPRCubic * _cubic= static_cast<VTPRCubic *>(cubic.get());
+    const std::vector<UNIFAQLibrary::Component> &components = _cubic->get_unifaq().get_components();
+    
+    /// If components is not present, you are using a vanilla cubic, so don't do anything
+    if (components.empty()){ return; }
+    
+    for (std::size_t i = 0; i < N; ++i){
+        const std::string &alpha_type = components[i].alpha_type;
+        if (alpha_type != "default"){
+            const std::vector<double> &c = components[i].alpha_coeffs;
+            shared_ptr<AbstractCubicAlphaFunction> acaf;
+            if (alpha_type == "Twu"){
+                acaf.reset(new TwuAlphaFunction(get_cubic()->a0_ii(i), c[0], c[1], c[2], get_cubic()->T_r/get_cubic()->get_Tc()[i]));
+            }
+            else if (alpha_type == "MathiasCopeman" || alpha_type == "Mathias-Copeman"){
+                acaf.reset(new MathiasCopemanAlphaFunction(get_cubic()->a0_ii(i), c[0], c[1], c[2], get_cubic()->T_r / get_cubic()->get_Tc()[i]));
+            }
+            else{
+                throw ValueError("alpha function is not understood");
+            }
+            cubic->set_alpha_function(i, acaf);
+        }
+    }
+}
+
+CoolPropDbl CoolProp::VTPRBackend::calc_molar_mass(void)
+{
+    double summer = 0;
+    for (unsigned int i = 0; i < N; ++i){
+        summer += mole_fractions[i]*molemass[i];
+    }
+    return summer;
 }
 
 const UNIFAQLibrary::UNIFAQParameterLibrary & CoolProp::VTPRBackend::LoadLibrary(){

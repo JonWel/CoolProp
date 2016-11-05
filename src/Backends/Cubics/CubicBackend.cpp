@@ -3,11 +3,14 @@
 #include "Backends/Helmholtz/VLERoutines.h"
 
 void CoolProp::AbstractCubicBackend::setup(bool generate_SatL_and_SatV){
-    // Set the pure fluid flag
-    is_pure_or_pseudopure = cubic->get_Tc().size() == 1;
-    // Resize the vector
-    resize(cubic->get_Tc().size());
     N = cubic->get_Tc().size();
+    
+    // Set the pure fluid flag
+    is_pure_or_pseudopure = (N == 1);
+    
+    // Resize the vectors
+    resize(N);
+    
 	// Reset the residual Helmholtz energy class
 	residual_helmholtz.reset(new CubicResidualHelmholtz(this));
 	// If pure, set the mole fractions to be unity
@@ -22,6 +25,9 @@ void CoolProp::AbstractCubicBackend::setup(bool generate_SatL_and_SatV){
 	// Now set the reducing function for the mixture
     Reducing.reset(new ConstantReducingFunction(cubic->T_r, cubic->rho_r));
 
+    // Set the alpha function based on the components in use
+    set_alpha_from_components();
+
     // Top-level class can hold copies of the base saturation classes,
     // saturation classes cannot hold copies of the saturation classes
     if (generate_SatL_and_SatV)
@@ -34,6 +40,38 @@ void CoolProp::AbstractCubicBackend::setup(bool generate_SatL_and_SatV){
         SatV->specify_phase(iphase_gas);
         linked_states.push_back(SatV);
     }
+}
+
+void CoolProp::AbstractCubicBackend::set_alpha_from_components(){
+    /// If components is not present, you are using a vanilla cubic, so don't do anything
+    if (components.empty()){ return; }
+
+    for (std::size_t i = 0; i < N; ++i){
+        const std::string &alpha_type = components[i].alpha_type;
+        if (alpha_type != "default"){
+            const std::vector<double> &c = components[i].alpha_coeffs;
+            shared_ptr<AbstractCubicAlphaFunction> acaf;
+            if (alpha_type == "Twu"){
+                acaf.reset(new TwuAlphaFunction(get_cubic()->a0_ii(i), c[0], c[1], c[2], get_cubic()->T_r/get_cubic()->get_Tc()[i]));
+            }
+            else if (alpha_type == "MathiasCopeman" || alpha_type == "Mathias-Copeman"){
+                acaf.reset(new MathiasCopemanAlphaFunction(get_cubic()->a0_ii(i), c[0], c[1], c[2], get_cubic()->T_r / get_cubic()->get_Tc()[i]));
+            }
+            else{
+                throw ValueError("alpha function is not understood");
+            }
+            cubic->set_alpha_function(i, acaf);
+        }
+    }
+}
+
+std::vector<std::string> CoolProp::AbstractCubicBackend::calc_fluid_names(void)
+{
+    std::vector<std::string> out;
+    for (std::size_t i = 0; i < components.size(); ++i){
+        out.push_back(components[i].name);
+    }
+    return out;
 }
 
 void CoolProp::AbstractCubicBackend::get_linear_reducing_parameters(double &rhomolar_r, double &T_r){
@@ -408,6 +446,7 @@ CoolPropDbl CoolProp::AbstractCubicBackend::solver_rho_Tp(CoolPropDbl T, CoolPro
         else{
             if (p < p_critical()){
                 add_transient_pure_state();
+		transient_pure_state->set_mole_fractions(this->mole_fractions);
                 transient_pure_state->update(PQ_INPUTS, p, 0);
                 if (T > transient_pure_state->T()){
                     double rhoV = transient_pure_state->saturated_vapor_keyed_output(iDmolar);
@@ -476,6 +515,14 @@ double CoolProp::AbstractCubicBackend::get_binary_interaction_double(const std::
     }
 };
 
+void CoolProp::AbstractCubicBackend::copy_all_alpha_functions(AbstractCubicBackend *donor){
+    get_cubic()->set_all_alpha_functions(donor->get_cubic()->get_all_alpha_functions());
+    for (std::vector<shared_ptr<HelmholtzEOSMixtureBackend> >::iterator it = linked_states.begin(); it != linked_states.end(); ++it) {
+        AbstractCubicBackend *ACB = static_cast<AbstractCubicBackend *>(it->get());
+        ACB->copy_all_alpha_functions(this);
+    }
+}
+
 void CoolProp::AbstractCubicBackend::copy_k(AbstractCubicBackend *donor){
     get_cubic()->set_kmat(donor->get_cubic()->get_kmat());
     for (std::vector<shared_ptr<HelmholtzEOSMixtureBackend> >::iterator it = linked_states.begin(); it != linked_states.end(); ++it) {
@@ -484,32 +531,33 @@ void CoolProp::AbstractCubicBackend::copy_k(AbstractCubicBackend *donor){
     }
 }
 
-void CoolProp::AbstractCubicBackend::set_C_MC(double c1, double c2, double c3)
-{
-    get_cubic()->set_C_MC(c1, c2, c3);
+void CoolProp::AbstractCubicBackend::set_cubic_alpha_C(const size_t i, const std::string &parameter, const double c1, const double c2, const double c3){
+    if (parameter == "MC" || parameter == "mc" || parameter == "Mathias-Copeman") {
+        get_cubic()->set_C_MC(i,c1, c2, c3);
+    }
+    else if (parameter == "TWU" || parameter == "Twu" || parameter == "twu") {
+        get_cubic()->set_C_Twu(i,c1, c2, c3);
+    }
+    else {
+        throw ValueError(format("I don't know what to do with parameter [%s]", parameter.c_str()));
+    }
     for (std::vector<shared_ptr<HelmholtzEOSMixtureBackend> >::iterator it = linked_states.begin(); it != linked_states.end(); ++it) {
         AbstractCubicBackend *ACB = static_cast<AbstractCubicBackend *>(it->get());
-        ACB->set_C_MC(c1,c2,c3);
+        ACB->set_cubic_alpha_C(i, parameter, c1, c2, c3);
     }
 }
 
-void CoolProp::AbstractCubicBackend::set_C_Twu(double L, double M, double N){
-    get_cubic()->set_C_Twu(L, M, N);
-    for (std::vector<shared_ptr<HelmholtzEOSMixtureBackend> >::iterator it = linked_states.begin(); it != linked_states.end(); ++it) {
-        AbstractCubicBackend *ACB = static_cast<AbstractCubicBackend *>(it->get());
-        ACB->set_C_Twu(L,M,N);
-    }
-}
-
-void CoolProp::AbstractCubicBackend::set_fluid_parameter_double(const size_t i, const std::string parameter, const double value)
+void CoolProp::AbstractCubicBackend::set_fluid_parameter_double(const size_t i, const std::string &parameter, const double value)
 {
-	// Set the volume translation parrameter, currently applied to the whole fluid, not to components.
-	if (parameter == "c" || parameter == "cm" || parameter == "c_m") {
-		get_cubic()->set_cm(value);
-		if (this->SatL.get() != NULL) { this->SatL->set_fluid_parameter_double(i, "cm", value); }
-		if (this->SatV.get() != NULL) { this->SatV->set_fluid_parameter_double(i, "cm", value); }
-	}
-	else {
-		throw ValueError(format("I don't know what to do with parameter [%s]", parameter.c_str()));
-	}
+    // Set the volume translation parrameter, currently applied to the whole fluid, not to components.
+    if (parameter == "c" || parameter == "cm" || parameter == "c_m") {
+        get_cubic()->set_cm(value);
+        for (std::vector<shared_ptr<HelmholtzEOSMixtureBackend> >::iterator it = linked_states.begin(); it != linked_states.end(); ++it) {
+            AbstractCubicBackend *ACB = static_cast<AbstractCubicBackend *>(it->get());
+            ACB->set_fluid_parameter_double(i, parameter, value);
+        }
+    }
+    else {
+        throw ValueError(format("I don't know what to do with parameter [%s]", parameter.c_str()));
+    }
 }

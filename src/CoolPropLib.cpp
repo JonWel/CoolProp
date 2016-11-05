@@ -16,6 +16,7 @@
 #include "AbstractState.h"
 #include "Exceptions.h"
 #include "Configuration.h"
+#include "Backends/Helmholtz/MixtureParameters.h"
 
 #include <string.h>
 
@@ -29,7 +30,7 @@ void str2buf(const std::string& str, char * buf, int n)
 void HandleException(long *errcode, char *message_buffer, const long buffer_length)
 {
     try{
-        throw;
+        throw; // Rethrow the error, and here we handle the error
     }
     catch (CoolProp::HandleError &e) {
         std::string errmsg = std::string("HandleError: ") + e.what();
@@ -326,6 +327,29 @@ EXPORT_CODE void CONVENTION set_config_string(const char * key, const char * val
     catch (std::exception &e) { CoolProp::set_error_string(e.what()); }
     catch (...) { CoolProp::set_error_string("Undefined error"); }
 }
+EXPORT_CODE void CONVENTION set_config_double(const char * key, const double val) {
+    try {
+        CoolProp::set_config_double(CoolProp::config_string_to_key(std::string(key)), val);
+    }
+    catch (std::exception &e) { CoolProp::set_error_string(e.what()); }
+    catch (...) { CoolProp::set_error_string("Undefined error"); }
+}
+EXPORT_CODE void CONVENTION set_config_bool(const char * key, const bool val) {
+    try {
+        CoolProp::set_config_bool(CoolProp::config_string_to_key(std::string(key)), val);
+    }
+    catch (std::exception &e) { CoolProp::set_error_string(e.what()); }
+    catch (...) { CoolProp::set_error_string("Undefined error"); }
+}
+EXPORT_CODE void CONVENTION set_departure_functions(const char * string_data, long *errcode, char *message_buffer, const long buffer_length) {
+    *errcode = 0;
+    try {
+        CoolProp::set_departure_functions(string_data);
+    }
+    catch (...) { 
+        HandleException(errcode, message_buffer, buffer_length);
+    }
+}
 EXPORT_CODE double CONVENTION HAPropsSI(const char *Output, const char *Name1, double Prop1, const char *Name2, double Prop2, const char * Name3, double Prop3)
 {
     fpu_reset_guard guard;
@@ -580,6 +604,17 @@ EXPORT_CODE void CONVENTION AbstractState_set_binary_interaction_double(const lo
 	}
 }
 
+EXPORT_CODE void CONVENTION  AbstractState_set_cubic_alpha_C(const long handle, const long i, const char* parameter, const double c1, const double c2, const double c3 , long *errcode, char *message_buffer, const long buffer_length) {
+    *errcode = 0;
+    try {
+        shared_ptr<CoolProp::AbstractState> &AS = handle_manager.get(handle);
+        AS->set_cubic_alpha_C(static_cast<std::size_t>(i),parameter, c1, c2, c3);
+    }
+    catch (...) {
+		HandleException(errcode, message_buffer, buffer_length);
+	}
+}
+
 EXPORT_CODE void CONVENTION  AbstractState_set_fluid_parameter_double(const long handle, const long i, const char* parameter, const double value , long *errcode, char *message_buffer, const long buffer_length) {
     *errcode = 0;
     try {
@@ -589,6 +624,92 @@ EXPORT_CODE void CONVENTION  AbstractState_set_fluid_parameter_double(const long
     catch (...) {
 		HandleException(errcode, message_buffer, buffer_length);
 	}
+}
+
+EXPORT_CODE void CONVENTION AbstractState_build_phase_envelope(const long handle, const char *level, long *errcode, char *message_buffer, const long buffer_length) {
+    *errcode = 0;
+    try {
+        shared_ptr<CoolProp::AbstractState> &AS = handle_manager.get(handle);
+        AS->build_phase_envelope(level);
+    }
+    catch (...) {
+        HandleException(errcode, message_buffer, buffer_length);
+    }
+}
+
+EXPORT_CODE void CONVENTION AbstractState_get_phase_envelope_data(const long handle, const long length, double* T, double* p, double* rhomolar_vap, double *rhomolar_liq, double *x, double *y, long *errcode, char *message_buffer, const long buffer_length) {
+    *errcode = 0;
+    try {
+        shared_ptr<CoolProp::AbstractState> &AS = handle_manager.get(handle);
+        CoolProp::PhaseEnvelopeData pe = AS->get_phase_envelope_data();
+        if (pe.T.size() > length){
+            throw CoolProp::ValueError(format("Length of phase envelope vectors [%d] is greater than allocated buffer length [%d]", static_cast<int>(pe.T.size()), static_cast<int>(length)));
+        }
+        std::size_t N = pe.x.size();
+        for (int i = 0; i<pe.T.size(); i++){
+            *(T+i) = pe.T[i];
+            *(p+i) = pe.p[i];
+            *(rhomolar_vap+i) = pe.rhomolar_vap[i];
+            *(rhomolar_liq+i) = pe.rhomolar_liq[i];
+            for (int j = 0; j < N; ++j){
+                *(x+i*N+j) = pe.x[j][i];
+                *(y+i*N+j) = pe.y[j][i];
+            }
+        }
+    }
+    catch (...) {
+        HandleException(errcode, message_buffer, buffer_length);
+    }
+}
+
+EXPORT_CODE void CONVENTION AbstractState_build_spinodal(const long handle, long *errcode, char *message_buffer, const long buffer_length) {
+    *errcode = 0;
+    try {
+        shared_ptr<CoolProp::AbstractState> &AS = handle_manager.get(handle);
+        AS->build_spinodal();
+    }
+    catch (...) {
+        HandleException(errcode, message_buffer, buffer_length);
+    }
+}
+
+EXPORT_CODE void CONVENTION AbstractState_get_spinodal_data(const long handle, const long length, double* tau, double* delta, double* M1, long *errcode, char *message_buffer, const long buffer_length) {
+    *errcode = 0;
+    try {
+        shared_ptr<CoolProp::AbstractState> &AS = handle_manager.get(handle);
+        CoolProp::SpinodalData spin = AS->get_spinodal_data();
+        if (spin.tau.size() > length){
+            throw CoolProp::ValueError(format("Length of spinodal vectors [%d] is greater than allocated buffer length [%d]", static_cast<int>(spin.tau.size()), static_cast<int>(length)));
+        }
+        for (int i = 0; i<spin.tau.size(); ++i){
+            *(tau+i) = spin.tau[i];
+            *(delta+i) = spin.delta[i];
+            *(M1+i) = spin.M1[i];
+        }
+    }
+    catch (...) {
+        HandleException(errcode, message_buffer, buffer_length);
+    }
+}
+
+EXPORT_CODE void CONVENTION AbstractState_all_critical_points(const long handle, long length, double *T, double *p, double *rhomolar, long *stable, long *errcode, char *message_buffer, const long buffer_length) {
+    *errcode = 0;
+    try {
+        shared_ptr<CoolProp::AbstractState> &AS = handle_manager.get(handle);
+        std::vector<CoolProp::CriticalState> pts = AS->all_critical_points();
+        if (pts.size() > length){
+            throw CoolProp::ValueError(format("Length of critical point vector [%d] is greater than allocated buffer length [%d]", static_cast<int>(pts.size()), static_cast<int>(length)));
+        }
+        for (int i = 0; i < pts.size(); ++i){
+            *(T+i) = pts[i].T;
+            *(p+i) = pts[i].p;
+            *(rhomolar+i) = pts[i].rhomolar;
+            *(stable+i) = pts[i].stable;
+        }
+    }
+    catch (...) {
+        HandleException(errcode, message_buffer, buffer_length);
+    }
 }
 
 /// *********************************************************************************

@@ -524,10 +524,13 @@ bool add_fluids_as_JSON(const std::string &backend, const std::string &fluidstri
     {
         CubicLibrary::add_fluids_as_JSON(fluidstring); return true;
     }
-    else{
-        throw ValueError(format("You have provided an invalid backend [%s] to add_fluids_as_JSON",backend.c_str()));
+    else if (backend == "HEOS")
+    {
+        JSONFluidLibrary::add_many(fluidstring); return true;
     }
-    
+    else{
+        throw ValueError(format("You have provided an invalid backend [%s] to add_fluids_as_JSON; valid options are SRK, PR, HEOS",backend.c_str()));
+    }
 }
 #if defined(ENABLE_CATCH)
 TEST_CASE("Check inputs to PropsSI","[PropsSI]")
@@ -973,24 +976,3 @@ std::string PhaseSI(const std::string &Name1, double Prop1, const std::string &N
 */
 } /* namespace CoolProp */
 
-
-
-/// *********************************************************************************
-/// *********************************************************************************
-///                     EMSCRIPTEN (for javascript)
-/// *********************************************************************************
-/// *********************************************************************************
-
-#ifdef EMSCRIPTEN
-
-#include <emscripten/bind.h>
-using namespace emscripten;
-
-// Binding code
-EMSCRIPTEN_BINDINGS(coolprop_bindings) {
-    function("Props1SI", &CoolProp::Props1SI);
-    function("PropsSI", &CoolProp::PropsSI);
-    function("get_global_param_string", &CoolProp::get_global_param_string);
-}
-
-#endif

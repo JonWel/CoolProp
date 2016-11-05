@@ -46,10 +46,21 @@ namespace UNIFAQLibrary{
             c.Tc = (*itr)["Tc"].GetDouble();
             c.pc = (*itr)["pc"].GetDouble();
             c.acentric = (*itr)["acentric"].GetDouble();
+            c.molemass = (*itr)["molemass"].GetDouble();
             // userid is an optional user identifier
             if ((*itr).HasMember("userid")){
                 c.userid = (*itr)["userid"].GetString();
             }
+            // If provided, store information about the alpha function in use
+            if ((*itr).HasMember("alpha") && (*itr)["alpha"].IsObject()){
+                rapidjson::Value &alpha = (*itr)["alpha"];
+                c.alpha_type = cpjson::get_string(alpha, "type");
+                c.alpha_coeffs = cpjson::get_double_array(alpha, "c");
+            }
+            else{
+                c.alpha_type = "default";
+            }
+            
             rapidjson::Value &groups = (*itr)["groups"];
             for (rapidjson::Value::ValueIterator itrg = groups.Begin(); itrg != groups.End(); ++itrg)
             {
@@ -103,7 +114,7 @@ namespace UNIFAQLibrary{
                 return ip;
             }
         }
-        throw CoolProp::ValueError("Could not find interaction pair");
+        throw CoolProp::ValueError(format("Could not find interaction between pair mgi[%d]-mgi[%d]", static_cast<int>(mgi1), static_cast<int>(mgi2)));
     }
 
     Component UNIFAQParameterLibrary::get_component(const std::string &identifier, const std::string &value) const {
@@ -112,7 +123,7 @@ namespace UNIFAQLibrary{
                 if (it->name == value ){ return *it; }
             }
         }
-        throw CoolProp::ValueError(format("Could not find component: %s with identifier: %s", value, identifier));
+        throw CoolProp::ValueError(format("Could not find component: %s with identifier: %s", value.c_str(), identifier.c_str()));
     }
 
 }; /* namespace UNIFAQLibrary */
@@ -133,28 +144,28 @@ TEST_CASE("Check Poling example for UNIFAQ", "[UNIFAQ]")
     SECTION("Validate AC for acetone + n-pentane") {
         UNIFAQLibrary::UNIFAQParameterLibrary lib;
         CHECK_NOTHROW(lib.populate(groups, interactions, acetone_pentane_groups););
-        UNIFAQ::UNIFAQMixture mix(lib);
+        UNIFAQ::UNIFAQMixture mix(lib,1.0);
         std::vector<std::string> names; names.push_back("Acetone"); names.push_back("n-Pentane");
         mix.set_components("name",names);
         mix.set_interaction_parameters();
        
         std::vector<double> z(2,0.047); z[1] = 1-z[0];
         mix.set_mole_fractions(z);
-        CHECK_NOTHROW(mix.set_temperature(307, z););
+        CHECK_NOTHROW(mix.set_temperature(307););
         
-        double lngammaR0 = mix.ln_gamma_R(0);
-        double lngammaR1 = mix.ln_gamma_R(1);
+        double lngammaR0 = mix.ln_gamma_R(1.0/307,0,0);
+        double lngammaR1 = mix.ln_gamma_R(1.0/307,1,0);
         CAPTURE(lngammaR0);
         CAPTURE(lngammaR1);
         CHECK(std::abs(lngammaR0 - 1.66) < 1e-2);
         CHECK(std::abs(lngammaR1 - 5.68e-3) < 1e-3);
 
-        double gamma0 = mix.activity_coefficient(0);
-        double gamma1 = mix.activity_coefficient(1);
-        CAPTURE(gamma0);
-        CAPTURE(gamma1);
-        CHECK(std::abs(gamma0 - 4.99) < 1e-2);
-        CHECK(std::abs(gamma1 - 1.005) < 1e-3);
+        std::vector<double> gamma(2);
+        mix.activity_coefficients(1.0/307,z,gamma);
+        CAPTURE(gamma[0]);
+        CAPTURE(gamma[1]);
+        CHECK(std::abs(gamma[0] - 4.99) < 1e-2);
+        CHECK(std::abs(gamma[1] - 1.005) < 1e-3);
     };
 };
 

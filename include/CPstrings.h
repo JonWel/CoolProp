@@ -6,11 +6,18 @@
     #include <algorithm>
     #include <functional>
 
+#if !defined(NO_CPPFORMAT)
     #ifndef FMT_HEADER_ONLY
     #define FMT_HEADER_ONLY
     #endif
     #include "fmt/format.h" // For addition of the string formatting functions and macros from cppformat
     #undef FMT_HEADER_ONLY
+#else
+    #include <vector>
+    #include <string>
+#endif
+
+    #include "Exceptions.h"
 
     #if !defined(__powerpc__)
     /// Copy string to wstring
@@ -43,11 +50,16 @@
         return lhs == rhs;
     }
 
+#if defined(NO_CPPFORMAT)
+    // Missing string formatting function, this old guy is needed for ancient gcc compilers on PowerPC for VxWorks
+    inline std::string format(const char* fmt, ...);
+#else
     // Missing std::string formatting function - provided by the cppformat library
     inline std::string format(const char *format, fmt::ArgList args) {
       return fmt::sprintf(format, args);
     }
     FMT_VARIADIC(std::string, format, const char *)
+#endif
 
     // Missing string split - like in Python
     std::vector<std::string> strsplit(const std::string &s, char del);
@@ -65,5 +77,33 @@
     }
 
     std::string strjoin(const std::vector<std::string> &strings, const std::string &delim);
+
+    /// A convenience function that return true if a string begins with the given other string
+    inline bool strstartswith(const std::string &s, const std::string &other){ return s.find(other) == 0; };
+
+    /**
+     * @brief Convert a number encoded as a string to a double
+     * @param s The string to be converted
+     *
+     * @note 
+     */
+    inline double string2double(const std::string &s){
+        std::string mys = s; //copy
+        // replace D with e (FORTRAN style scientific definition)
+        if (mys.find("D") != std::string::npos){ std::size_t pos = mys.find("D"), len = 1; mys.replace(pos,len,"e"); }
+        // replace d with e (FORTRAN style scientific definition)
+        if (mys.find("d") != std::string::npos){ std::size_t pos = mys.find("d"), len = 1; mys.replace(pos,len,"e"); }
+        
+        const char * cs = mys.c_str();
+        char* pEnd;
+        double val = strtod(cs, &pEnd);
+        if ((pEnd - &(cs[0])) != s.size() ){
+            // Found a character that is not able to be converted to number
+            throw CoolProp::ValueError(format("Unable to convert this string to a number:%s",cs));
+        }
+        else{
+            return val;
+        }
+    }
 
 #endif

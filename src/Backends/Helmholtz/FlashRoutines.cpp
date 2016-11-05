@@ -59,7 +59,19 @@ void FlashRoutines::PT_flash_mixtures(HelmholtzEOSMixtureBackend &HEOS)
             // Following the strategy of Gernert, 2014
             StabilityRoutines::StabilityEvaluationClass stability_tester(HEOS);
             if (!stability_tester.is_stable()){
-                throw CoolProp::ValueError("PT_INPUTS are two-phase, not yet supported");
+                // There is a phase split and liquid and vapor phases are formed
+                CoolProp::SaturationSolvers::PTflash_twophase_options o;
+                stability_tester.get_liq(o.x, o.rhomolar_liq);
+                stability_tester.get_vap(o.y, o.rhomolar_vap);
+                o.z = HEOS.get_mole_fractions();
+                o.T = HEOS.T();
+                o.p = HEOS.p();
+                o.omega = 1.0;
+                CoolProp::SaturationSolvers::PTflash_twophase solver(HEOS, o);
+                solver.solve();
+                HEOS._phase = iphase_twophase;
+                HEOS._Q = (o.z[0] - o.x[0])/(o.y[0]-o.x[0]); // All vapor qualities are the same (these are the residuals in the solver)
+                HEOS._rhomolar = 1/(HEOS._Q/HEOS.SatV->rhomolar() + (1 - HEOS._Q)/HEOS.SatL->rhomolar());
             }
             else{
                 // It's single-phase
@@ -730,7 +742,7 @@ void FlashRoutines::QT_flash_with_guesses(HelmholtzEOSMixtureBackend &HEOS, cons
     IO.bubble_point = false;
     IO.imposed_variable = SaturationSolvers::newton_raphson_saturation_options::T_IMPOSED;
 
-    if (get_debug_level() > 9) { fmt::printf( " QT w/ guess  p %g T %g dl %g dv %g x %s y %s\n", IO.p, IO.T, IO.rhomolar_liq, IO.rhomolar_vap, vec_to_string(IO.x,"%g").c_str(), vec_to_string(IO.y, "%g").c_str()); }
+    if (get_debug_level() > 9) { std::cout << format( " QT w/ guess  p %g T %g dl %g dv %g x %s y %s\n", IO.p, IO.T, IO.rhomolar_liq, IO.rhomolar_vap, vec_to_string(IO.x,"%g").c_str(), vec_to_string(IO.y, "%g").c_str()); }
 
     if (std::abs(HEOS.Q()) < 1e-10) {
         IO.bubble_point = true;

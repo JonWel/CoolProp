@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.9)
+cmake_minimum_required(VERSION 2.8.11)
 
 
 if (DEFINED COOLPROP_INSTALL_PREFIX)
@@ -28,11 +28,15 @@ project(${project_name})
 
 # Project version
 set (COOLPROP_VERSION_MAJOR 6)
-set (COOLPROP_VERSION_MINOR 0)
+set (COOLPROP_VERSION_MINOR 1)
 set (COOLPROP_VERSION_PATCH 1)
 set (COOLPROP_VERSION_REVISION dev)
 set (COOLPROP_VERSION "${COOLPROP_VERSION_MAJOR}.${COOLPROP_VERSION_MINOR}.${COOLPROP_VERSION_PATCH}${COOLPROP_VERSION_REVISION}")
 message(STATUS "CoolProp version: ${COOLPROP_VERSION}")
+
+string ( TIMESTAMP COOLPROP_YEAR 2010-%Y )
+#set ( COOLPROP_YEAR "2010-2016" )
+set ( COOLPROP_PUBLISHER "The CoolProp developers")
 
 #######################################
 #           BUILD OPTIONS             #
@@ -58,6 +62,10 @@ option (COOLPROP_OBJECT_LIBRARY
 option (COOLPROP_EES_MODULE
         "Build the EES module"
         OFF)
+        
+option (COOLPROP_WINDOWS_PACKAGE
+        "Build the Windows installer"
+        OFF)
 
 option (BUILD_TESTING 
         "Enable testing for this given builder" 
@@ -82,6 +90,13 @@ option (COOLPROP_DEBUG
 option (COOLPROP_SMATH_WORK_INPLACE
        "Build SMath wrapper in source directory"
        OFF)
+	   
+option (COOLPROP_MSVC_STATIC
+       "Statically link Microsoft Standard library removes dependency on MSVCRXXX.dll."
+       ON)
+option (COOLPROP_MSVC_DEBUG
+       "Link the debug version of Microsoft Standard library to the debug builds."
+       ON)
        
 IF ( COOLPROP_RELEASE AND COOLPROP_DEBUG )
   MESSAGE(FATAL_ERROR "You can only make a release OR and debug build.")
@@ -90,13 +105,29 @@ IF (COOLPROP_RELEASE)
   SET(CMAKE_BUILD_TYPE Release)
 ELSEIF (COOLPROP_DEBUG)
   SET(CMAKE_BUILD_TYPE Debug)
-ELSEIF ("${CMAKE_BUILD_TYPE}" STREQUAL "")
-  IF("${COOLPROP_VERSION_REVISION}" STREQUAL "dev")
-    SET(CMAKE_BUILD_TYPE Debug)
-  ELSE ()
-    SET(CMAKE_BUILD_TYPE Release)
-  ENDIF()
+#ELSEIF ("${CMAKE_BUILD_TYPE}" STREQUAL "")
+#  IF("${COOLPROP_VERSION_REVISION}" STREQUAL "dev")
+#    SET(CMAKE_BUILD_TYPE Debug)
+#  ELSE ()
+#    SET(CMAKE_BUILD_TYPE Release)
+#  ENDIF()
 ENDIF ()
+
+IF (COOLPROP_MSVC_STATIC)
+  SET(COOLPROP_MSVC_REL "/MT")
+  IF (COOLPROP_MSVC_DEBUG)
+    SET(COOLPROP_MSVC_DBG "/MTd")
+  ELSE()
+    SET(COOLPROP_MSVC_DBG "/MT")
+  ENDIF()
+ELSE ()
+  SET(COOLPROP_MSVC_REL "/MD")
+  IF (COOLPROP_MSVC_DEBUG)
+    SET(COOLPROP_MSVC_DBG "/MDd")
+  ELSE()
+    SET(COOLPROP_MSVC_DBG "/MD")
+  ENDIF()
+ENDIF()
 
 #######################################
 #         FIND ALL SOURCES            #
@@ -134,6 +165,8 @@ set(SWIG_DEPENDENCIES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Configuration.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/PhaseEnvelope.h)
 
+set(COOLPROP_APP_SOURCES ${APP_SOURCES} CACHE LIST "List of CPP sources needed for CoolProp")
+set(COOLPROP_INCLUDE_DIRECTORIES ${APP_INCLUDE_DIRS} CACHE LIST "List of include directories needed for CoolProp")
 
 #######################################
 #         REQUIRED MODULES            #
@@ -146,7 +179,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/dev/cmak
 
 set(Python_ADDITIONAL_VERSIONS 2.7 2.6 2.5 2.4)
 find_package (PythonInterp 2.7 REQUIRED)
-if(UNIX)
+if(CMAKE_DL_LIBS)
     find_package (${CMAKE_DL_LIBS} REQUIRED)
 endif()
 
@@ -273,7 +306,14 @@ IF ( COOLPROP_OBJECT_LIBRARY OR COOLPROP_STATIC_LIBRARY OR COOLPROP_SHARED_LIBRA
   ELSEIF (COOLPROP_STATIC_LIBRARY)
     LIST(APPEND APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${COOLPROP_LIBRARY_SOURCE}")
     ADD_LIBRARY(${LIB_NAME} STATIC ${APP_SOURCES} ${COOLPROP_LIBRARY_EXPORTS})
-    INSTALL(TARGETS ${LIB_NAME} DESTINATION static_library/${CMAKE_SYSTEM_NAME} )#TODO: /${BITNESS}bit${CONVENTION} )
+	IF (MSVC)
+	  # Add postfix for debugging
+	  SET_PROPERTY(TARGET ${LIB_NAME} PROPERTY DEBUG_POSTFIX d)
+	  SET_PROPERTY(TARGET ${LIB_NAME} PROPERTY RELEASE_POSTFIX )
+	  SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${COOLPROP_MSVC_REL}")
+	  SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${COOLPROP_MSVC_DBG}")
+	ENDIF (MSVC)
+    INSTALL(TARGETS ${LIB_NAME} DESTINATION static_library/${CMAKE_SYSTEM_NAME}/${BITNESS}bit_${CMAKE_CXX_COMPILER_ID}_${CMAKE_CXX_COMPILER_VERSION} )
     INSTALL(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${COOLPROP_LIBRARY_HEADER} DESTINATION static_library)
   ELSEIF (COOLPROP_SHARED_LIBRARY)
     LIST(APPEND APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${COOLPROP_LIBRARY_SOURCE}")
@@ -283,11 +323,13 @@ IF ( COOLPROP_OBJECT_LIBRARY OR COOLPROP_STATIC_LIBRARY OR COOLPROP_SHARED_LIBRA
     SET_PROPERTY (TARGET ${LIB_NAME} APPEND_STRING PROPERTY COMPILE_FLAGS " -DCOOLPROP_LIB")
     # Now all the compiler specific settings for Visual Studio
     IF (MSVC)
+	  # Add postfix for debugging
+	  SET_PROPERTY(TARGET ${LIB_NAME} PROPERTY DEBUG_POSTFIX d)
+	  SET_PROPERTY(TARGET ${LIB_NAME} PROPERTY RELEASE_POSTFIX )
       # No lib prefix for the shared library
-      SET_PROPERTY(TARGET ${LIB_NAME} PROPERTY PREFIX "")
-      #  Force visual studio to statically link the c runtime to avoid dependency on MSVCRXXX.dll
-      SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-      SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+      SET_PROPERTY(TARGET ${LIB_NAME} PROPERTY PREFIX "")	  
+      SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${COOLPROP_MSVC_REL}")
+	  SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${COOLPROP_MSVC_DBG}")
       ADD_CUSTOM_COMMAND(TARGET ${LIB_NAME} POST_BUILD 
         COMMAND dumpbin /EXPORTS $<TARGET_FILE:${LIB_NAME}> > ${CMAKE_CURRENT_BINARY_DIR}/exports.txt)
       INSTALL (FILES ${CMAKE_CURRENT_BINARY_DIR}/exports.txt 
@@ -358,7 +400,7 @@ IF ( COOLPROP_OBJECT_LIBRARY OR COOLPROP_STATIC_LIBRARY OR COOLPROP_SHARED_LIBRA
   #
   #set_property(SOURCE MyFile.cpp APPEND_STRING PROPERTY COMPILE_FLAGS " -msse4.1 ")
   MESSAGE(STATUS "Library compilation detected:")
-  MESSAGE(STATUS "Creating ${LIB_NAME}, a ${BITNESS}-bit library with ${CMAKE_BUILD_TYPE} settings")
+  MESSAGE(STATUS "Creating ${LIB_NAME}, a ${BITNESS}-bit library with (${COOLPROP_MSVC_REL},${COOLPROP_MSVC_DBG}) settings")
   MESSAGE(STATUS "CMAKE_SYSTEM_NAME: ${CMAKE_SYSTEM_NAME}")
   MESSAGE(STATUS "COOLPROP_STATIC_LIBRARY: ${COOLPROP_STATIC_LIBRARY}")
   MESSAGE(STATUS "COOLPROP_SHARED_LIBRARY: ${COOLPROP_SHARED_LIBRARY}")
@@ -374,6 +416,29 @@ IF ( COOLPROP_OBJECT_LIBRARY OR COOLPROP_STATIC_LIBRARY OR COOLPROP_SHARED_LIBRA
   #
 ENDIF()
 
+
+if (COOLPROP_IOS_TARGET)
+  # Set the Base SDK (only change the SDKVER value, if for instance, you are building for iOS 5.0):
+  set(SDKVER "9.2")
+  set(DEVROOT "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer")
+  set(SDKROOT "${DEVROOT}/SDKs/iPhoneOS${SDKVER}.sdk")
+  if(EXISTS ${SDKROOT})
+      set(CMAKE_OSX_SYSROOT "${SDKROOT}")
+  else()
+      message("Warning, iOS Base SDK path not found: " ${SDKROOT})
+  endif()
+
+  # Will resolve to "Standard (armv6 armv7)" on Xcode 4.0.2 and to "Standard (armv7)" on Xcode 4.2:
+  set(CMAKE_OSX_ARCHITECTURES "$(ARCHS_STANDARD_32_BIT)")
+
+  # seamless toggle between device and simulator
+  set(CMAKE_XCODE_EFFECTIVE_PLATFORMS "-iphoneos;-iphonesimulator")
+
+  include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}
+  )
+endif()
+
 if (COOLPROP_DEBIAN_PACKAGE)
     if(NOT UNIX)
       message(FATAL_ERROR "COOLPROP_DEBIAN_PACKAGE can only be used on linux host")
@@ -387,29 +452,24 @@ if (COOLPROP_DEBIAN_PACKAGE)
     install (FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/CoolPropLib.h DESTINATION "${CMAKE_INSTALL_PREFIX}/usr/include")
 endif()
 
-#~ if (COOLPROP_VXWORKS_LIBRARY_MODULE OR COOLPROP_VXWORKS_LIBRARY)
-    #~ # strip off the path up to the src directory
+if (COOLPROP_VXWORKS_MAKEFILE)
     
-    #~ set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    set(INCLUDE_DIRECTORIES)
+    foreach (_srcFile ${APP_INCLUDE_DIRS})
+        string(CONCAT _el "-I\"" ${_srcFile} "\"")
+        string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}" "$(COOLPROP_ROOT)" _el "${_el}")
+        list (APPEND INCLUDE_DIRECTORIES ${_el})
+    endforeach()
+    string(REPLACE ";" " " INCLUDE_DIRECTORIES "${INCLUDE_DIRECTORIES}")
+    set(OLD_ROOT /home/ian/.wine/drive_c/)
+    set(NEW_ROOT c:/)
+    string(REPLACE ${OLD_ROOT} ${NEW_ROOT} INCLUDE_DIRECTORIES "${INCLUDE_DIRECTORIES}")
+    set(SRC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    string(REPLACE ${OLD_ROOT} ${NEW_ROOT} SRC "${SRC}")
+    file(RELATIVE_PATH COOLPROP_ROOT "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
     
-    #~ set(OBJECTS)
-    #~ foreach (_srcFile ${APP_SOURCES})
-        #~ string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src/" "$(OBJ_DIR)/" _el ${_srcFile})
-        #~ string(REPLACE ".cpp" ".o" _el ${_el})
-        #~ list (APPEND OBJECTS ${_el})
-    #~ endforeach()
-    #~ set(OBJECTS "${OBJECTS}")
-    #~ string(REPLACE ";" " " OBJECTS "${OBJECTS}")
-    
-    #~ set(INCLUDE_DIRECTORIES)
-    #~ foreach (_srcFile ${APP_INCLUDE_DIRS})
-        #~ string(CONCAT _el "-I\"" ${_srcFile} "\"")
-        #~ list (APPEND INCLUDE_DIRECTORIES ${_el})
-    #~ endforeach()
-    #~ string(REPLACE ";" " " INCLUDE_DIRECTORIES "${INCLUDE_DIRECTORIES}")
-    
-    #~ CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/wrappers/Labview/VxWorks/Makefile.in" "Makefile")
-#~ endif()
+    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/wrappers/Labview/vxWorks/Makefile.in" "vxWorksMakefile")
+endif()
 
 if (COOLPROP_VXWORKS_LIBRARY_MODULE OR COOLPROP_VXWORKS_LIBRARY)
     list(APPEND APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/CoolPropLib.cpp")
@@ -462,51 +522,209 @@ if (COOLPROP_MATHCAD15_MODULE)
     install (FILES "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/MathCAD/CoolProp_EN.xml" DESTINATION MathCAD15)
 endif()
 
-# EES is only compiled for windows
+# EES is only compiled for 32bit Windows
 if (COOLPROP_EES_MODULE)
-  list (APPEND APP_SOURCES "wrappers/EES/main.cpp")
-  list(APPEND APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/CoolPropLib.cpp")
+  IF (NOT "${BITNESS}" STREQUAL "32")
+    MESSAGE(FATAL_ERROR "You cannot build the EES wrapper as a 64-bit library.")
+  ENDIF()
+  # Prepare the sources
   include_directories(${APP_INCLUDE_DIRS})
+  list (APPEND APP_SOURCES "wrappers/EES/main.cpp")
+  list (APPEND APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${COOLPROP_LIBRARY_SOURCE}")  
   add_library(COOLPROP_EES SHARED ${APP_SOURCES})
+  # Modify the target and add dependencies
+  add_dependencies (COOLPROP_EES generate_headers)
   set_target_properties (COOLPROP_EES PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} -DCOOLPROP_LIB -DCONVENTION=__cdecl")
-  add_dependencies (COOLPROP_EES generate_headers)
-  set_target_properties(COOLPROP_EES PROPERTIES SUFFIX ".dlf" PREFIX "")
-  message(STATUS "Injecting the version COOLPROP_VERSION=${COOLPROP_VERSION}")
-  # Put the version into the InnoInstaller setup file
-  CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/wrappers/EES/BuildInnoInstaller.iss.in" "${CMAKE_CURRENT_BINARY_DIR}/BuildInnoInstaller.iss")
-  if (NOT MSVC)
-    set_target_properties(COOLPROP_EES PROPERTIES COMPILE_FLAGS "-m32" LINK_FLAGS "-m32")
-  endif()
-
-  add_dependencies (COOLPROP_EES generate_headers)
-  
-  if ( MSVC )
-    set_target_properties( COOLPROP_EES PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} )
-    set_target_properties( COOLPROP_EES PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_CURRENT_BINARY_DIR})
-    set_target_properties( COOLPROP_EES PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_CURRENT_BINARY_DIR})
+  set_target_properties (COOLPROP_EES PROPERTIES SUFFIX ".dlf" PREFIX "")
+  # Creates "COOLPROP_EES.dlf"
+  if ( NOT MSVC )
+    set_target_properties (COOLPROP_EES PROPERTIES COMPILE_FLAGS "-m32" LINK_FLAGS "-m32")
+  elseif ( MSVC )
+    set_target_properties (COOLPROP_EES PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} )
+    set_target_properties (COOLPROP_EES PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_CURRENT_BINARY_DIR})
+    set_target_properties (COOLPROP_EES PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_CURRENT_BINARY_DIR})
     # etc for the other available configuration types (MinSizeRel, RelWithDebInfo)
   endif ()
   # copy required files
-  set(REQUIRED_FILES
-    CoolProp.htm
-    CoolProp.LIB
-    CoolProp_EES_Sample.EES
-    )
-    foreach (_FILE ${REQUIRED_FILES})
-        add_custom_command(TARGET COOLPROP_EES
-                           PRE_BUILD
-                           COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/wrappers/EES/${_FILE} ${CMAKE_CURRENT_BINARY_DIR}/.)
-    endforeach()
-  
-  # Run InnoSetup to make the installer (must be on your path)
-  add_custom_command(TARGET COOLPROP_EES
-                     POST_BUILD
-                     COMMAND iscc /cc BuildInnoInstaller.iss
-                     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-  # install the generated executable installer from InnoSetup
-  install(
-    CODE "file( INSTALL ${CMAKE_CURRENT_BINARY_DIR}/Output/SetupCOOLPROP_EES.exe DESTINATION ${CMAKE_INSTALL_PREFIX}/EES/${CMAKE_SYSTEM_NAME} )"
+  add_custom_command (TARGET COOLPROP_EES PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/EES/CoolProp.htm" "${CMAKE_CURRENT_BINARY_DIR}/."
+	COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/EES/CoolProp.LIB" "${CMAKE_CURRENT_BINARY_DIR}/."
+	COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/EES/CoolProp_EES_Sample.EES" "${CMAKE_CURRENT_BINARY_DIR}/."
+	WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Copying the EES files to the build directory"
+    VERBATIM 
   )
+  # install the generated library and the other files 
+  install(TARGETS COOLPROP_EES DESTINATION "${CMAKE_INSTALL_PREFIX}/EES/${CMAKE_SYSTEM_NAME}")
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/EES/CoolProp.htm" DESTINATION "${CMAKE_INSTALL_PREFIX}/EES/${CMAKE_SYSTEM_NAME}")
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/EES/CoolProp.LIB" DESTINATION "${CMAKE_INSTALL_PREFIX}/EES/${CMAKE_SYSTEM_NAME}")
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/EES/CoolProp_EES_Sample.EES" DESTINATION "${CMAKE_INSTALL_PREFIX}/EES/${CMAKE_SYSTEM_NAME}")
+endif()
+
+# Windows package
+if (COOLPROP_WINDOWS_PACKAGE)
+
+  message(STATUS "Creating Windows installer for COOLPROP_VERSION=${COOLPROP_VERSION}")
+  # Setting some basic build paths
+  set(COOLPROP_WINDOWS_PACKAGE_32B_DIR "${CMAKE_CURRENT_BINARY_DIR}/32bitDLL")
+  set(COOLPROP_WINDOWS_PACKAGE_32B_DIR_STDCALL "${CMAKE_CURRENT_BINARY_DIR}/32bitDLL_stdcall")
+  set(COOLPROP_WINDOWS_PACKAGE_32B_DIR_CDECL "${CMAKE_CURRENT_BINARY_DIR}/32bitDLL_cdecl")
+  set(COOLPROP_WINDOWS_PACKAGE_64B_DIR "${CMAKE_CURRENT_BINARY_DIR}/64bitDLL")
+  set(COOLPROP_WINDOWS_PACKAGE_EES_DIR "${CMAKE_CURRENT_BINARY_DIR}/EES")
+  set(COOLPROP_WINDOWS_PACKAGE_TMP_DIR "${CMAKE_CURRENT_BINARY_DIR}/InnoScript")
+  # Pointers to the sources
+  set(COOLPROP_WINDOWS_PACKAGE_EXCEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/Excel")
+  set(COOLPROP_WINDOWS_PACKAGE_ISS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/externals/ExcelAddinInstaller")
+  # Generator for DLLs
+  set(COOLPROP_WINDOWS_PACKAGE_DLL_GEN "Visual Studio 10 2010")
+  # Configure variables like version number and build year
+  CONFIGURE_FILE("${COOLPROP_WINDOWS_PACKAGE_ISS_DIR}/cmake-templates/config.iss" "${COOLPROP_WINDOWS_PACKAGE_ISS_DIR}/config.iss")
+  # Find the installer generator executable
+  SET(BINDIR32_ENV_NAME "ProgramFiles(x86)")
+  SET(BINDIR32 $ENV{${BINDIR32_ENV_NAME}})
+  SET(BINDIR64_ENV_NAME "ProgramFiles")
+  SET(BINDIR64 $ENV{${BINDIR64_ENV_NAME}})
+  find_program (COOLPROP_WINDOWS_PACKAGE_ISS_EXE 
+    NAMES iscc.exe 
+    HINTS "${BINDIR32}/Inno Setup 5" "${BINDIR64}/Inno Setup 5"
+  )
+  
+  # ******************************************************************
+  # Add the targets that prepare the build directory for the subbuilds
+  # ******************************************************************
+  add_custom_target(COOLPROP_WINDOWS_PACKAGE_PREPARE) 
+  # Prepare directories
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_PREPARE PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_32B_DIR}"
+	COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_32B_DIR_STDCALL}"
+	COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_32B_DIR_CDECL}"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_64B_DIR}"
+	COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_EES_DIR}"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source"
+    #COMMAND ${CMAKE_COMMAND} ARGS "-E" "remove_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/deploy"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/deploy"
+    #COMMAND ${CMAKE_COMMAND} ARGS "-E" "remove_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Preparing the directories for the Windows installer"
+    VERBATIM )
+    
+  add_custom_target(COOLPROP_WINDOWS_PACKAGE_DELETE) 
+  # Delete directories
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_DELETE PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "remove_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/deploy"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/deploy"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "remove_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Removing the old build directories for the Windows installer"
+    VERBATIM )
+  
+  # **************************************************************
+  # Add the target for the shared libraries, 3x 32bit and 1x 64bit
+  # **************************************************************
+  add_custom_target(COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES)  
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES COOLPROP_WINDOWS_PACKAGE_PREPARE)
+  # Copy the header file
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES PRE_BUILD
+	COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${CMAKE_CURRENT_SOURCE_DIR}/include/CoolPropLib.h" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source/CoolPropLib.h"
+    WORKING_DIRECTORY ${COOLPROP_WINDOWS_PACKAGE_32B_DIR}
+    COMMENT "Copy the header file for the CoolProp library"
+    VERBATIM )
+  # # Build the 32bit DLLs
+  # add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES PRE_BUILD
+  #   COMMAND ${CMAKE_COMMAND} ARGS "-G${COOLPROP_WINDOWS_PACKAGE_DLL_GEN}" "${CMAKE_CURRENT_SOURCE_DIR}" "-DCOOLPROP_SHARED_LIBRARY=ON"
+  #   COMMAND ${CMAKE_COMMAND} ARGS "--build" "." "--target" "CoolProp" "--config" "Release"
+  #   COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_32B_DIR}/Release/CoolProp.dll" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source/CoolProp_x86.dll"
+  #   WORKING_DIRECTORY ${COOLPROP_WINDOWS_PACKAGE_32B_DIR}
+  #   COMMENT "Building the 32bit shared library with default settings"
+  #   VERBATIM )
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} ARGS "-G${COOLPROP_WINDOWS_PACKAGE_DLL_GEN}" "${CMAKE_CURRENT_SOURCE_DIR}" "-DCOOLPROP_SHARED_LIBRARY=ON" "-DCOOLPROP_STDCALL_LIBRARY=ON"
+    COMMAND ${CMAKE_COMMAND} ARGS "--build" "." "--target" "CoolProp" "--config" "Release"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_32B_DIR_STDCALL}/Release/CoolProp.dll" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source/CoolProp_stdcall.dll"
+    WORKING_DIRECTORY ${COOLPROP_WINDOWS_PACKAGE_32B_DIR_STDCALL}
+    COMMENT "Building the 32bit shared library with stdcall"
+    VERBATIM )
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} ARGS "-G${COOLPROP_WINDOWS_PACKAGE_DLL_GEN}" "${CMAKE_CURRENT_SOURCE_DIR}" "-DCOOLPROP_SHARED_LIBRARY=ON" "-DCOOLPROP_CDECL_LIBRARY=ON"
+    COMMAND ${CMAKE_COMMAND} ARGS "--build" "." "--target" "CoolProp" "--config" "Release"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_32B_DIR_CDECL}/Release/CoolProp.dll" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source/CoolProp_cdecl.dll"
+    WORKING_DIRECTORY ${COOLPROP_WINDOWS_PACKAGE_32B_DIR_CDECL}
+    COMMENT "Building the 32bit shared library with cdecl"
+    VERBATIM )
+  # Build the 64bit DLL
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} ARGS "-G${COOLPROP_WINDOWS_PACKAGE_DLL_GEN} Win64" "${CMAKE_CURRENT_SOURCE_DIR}" "-DCOOLPROP_SHARED_LIBRARY=ON"
+    COMMAND ${CMAKE_COMMAND} ARGS "--build" "." "--target" "CoolProp" "--config" "Release"
+	COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_64B_DIR}/Release/CoolProp.dll" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source/CoolProp_x64.dll"
+    WORKING_DIRECTORY ${COOLPROP_WINDOWS_PACKAGE_64B_DIR}
+    COMMENT "Building the 64bit shared library"
+    VERBATIM )
+
+  # *************************************************************
+  # Add the target for EES and populate it with custom commands
+  # *************************************************************
+  add_custom_target(COOLPROP_WINDOWS_PACKAGE_EES)
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_EES COOLPROP_WINDOWS_PACKAGE_PREPARE)
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_EES PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} ARGS "-G${COOLPROP_WINDOWS_PACKAGE_DLL_GEN}" "${CMAKE_CURRENT_SOURCE_DIR}" "-DCOOLPROP_EES_MODULE=ON"
+    COMMAND ${CMAKE_COMMAND} ARGS "--build" "." "--target" "COOLPROP_EES" "--config" "Release"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy_directory" "${COOLPROP_WINDOWS_PACKAGE_EES_DIR}" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source/EES"
+    WORKING_DIRECTORY ${COOLPROP_WINDOWS_PACKAGE_EES_DIR}
+    COMMENT "Building the 32bit library for EES"
+    VERBATIM )
+	
+  # *************************************************************
+  # Add the target for Excel and populate it with custom commands
+  # *************************************************************
+  add_custom_target(COOLPROP_WINDOWS_PACKAGE_EXCEL)
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_EXCEL COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES COOLPROP_WINDOWS_PACKAGE_PREPARE)
+  # Copy the Excel files
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_EXCEL PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_EXCEL_DIR}/CoolProp.xla" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source/"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_EXCEL_DIR}/CoolProp.xlam" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source/"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_EXCEL_DIR}/TestExcel.xlsx" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/source/"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "remove_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin/MicrosoftExcel/"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "make_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin/MicrosoftExcel/"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_EXCEL_DIR}/CoolProp.xla" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin/MicrosoftExcel/"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_EXCEL_DIR}/CoolProp.xlam" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin/MicrosoftExcel/"
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy" "${COOLPROP_WINDOWS_PACKAGE_EXCEL_DIR}/TestExcel.xlsx" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin/MicrosoftExcel/"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Copying the Excel files for the installer"
+    VERBATIM )
+    
+  # *******************************************************************
+  # Add the target for Inno Script and populate it with custom commands
+  # *******************************************************************
+  add_custom_target(COOLPROP_WINDOWS_PACKAGE_ISS)
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_ISS COOLPROP_WINDOWS_PACKAGE_EXCEL COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES COOLPROP_WINDOWS_PACKAGE_PREPARE)
+  # Copy the ISS files
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_ISS PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy_directory" "${COOLPROP_WINDOWS_PACKAGE_ISS_DIR}" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Copying the Inno Script files for the installer"
+    VERBATIM )
+
+  # *****************************************************************************
+  # Add the target for the installer package and populate it with custom commands
+  # *****************************************************************************
+  add_custom_target(COOLPROP_WINDOWS_PACKAGE_INSTALLER)
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_INSTALLER COOLPROP_WINDOWS_PACKAGE_DELETE)
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_INSTALLER COOLPROP_WINDOWS_PACKAGE_PREPARE)
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_INSTALLER COOLPROP_WINDOWS_PACKAGE_SHARED_LIBRARIES)
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_INSTALLER COOLPROP_WINDOWS_PACKAGE_EES)
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_INSTALLER COOLPROP_WINDOWS_PACKAGE_EXCEL)
+  add_dependencies (COOLPROP_WINDOWS_PACKAGE_INSTALLER COOLPROP_WINDOWS_PACKAGE_ISS)
+  # Build the installer and copy it to the bin directory
+  add_custom_command(TARGET COOLPROP_WINDOWS_PACKAGE_INSTALLER POST_BUILD
+    COMMAND ${COOLPROP_WINDOWS_PACKAGE_ISS_EXE} ARGS "addin-installer.iss"
+	COMMAND ${CMAKE_COMMAND} ARGS "-E" "copy_directory" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/deploy" "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin/Installers/Windows"
+    WORKING_DIRECTORY "${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}"
+    COMMENT "The new installer is located in '${COOLPROP_WINDOWS_PACKAGE_TMP_DIR}/bin/Installers/Windows'"
+    VERBATIM )
 endif()
 
 if (COOLPROP_OCTAVE_MODULE)
@@ -605,20 +823,16 @@ if (COOLPROP_CSHARP_MODULE)
   if (WIN32)
     set_target_properties(CoolProp PROPERTIES PREFIX "")
     if (MSVC)
-      #  Force visual studio to statically link the c runtime to avoid dependency on MSVCRXXX.dll
-      SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-      SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+      SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${COOLPROP_MSVC_REL}")
+	  SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${COOLPROP_MSVC_DBG}")
     endif()
   endif()
   
   add_dependencies (${app_name} generate_headers)  
 
-  # Remove the Example.cs file so it doesn't get packaged in platform-independent zip file
-  file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/Example.cs")
-
   add_custom_command(TARGET CoolProp
                      POST_BUILD
-                     COMMAND 7z a "${CMAKE_CURRENT_BINARY_DIR}/platform-independent.7z" "${CMAKE_CURRENT_BINARY_DIR}/*.cs"
+                     COMMAND 7z a "${CMAKE_CURRENT_BINARY_DIR}/platform-independent.7z" "${CMAKE_CURRENT_BINARY_DIR}/*.cs" -x!Example.cs
                      WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
   add_custom_command(TARGET CoolProp
                      POST_BUILD
@@ -736,9 +950,8 @@ if (COOLPROP_JAVA_MODULE)
   if (WIN32)
     set_target_properties(CoolProp PROPERTIES PREFIX "")
     if (MSVC)
-        #  Force visual studio to statically link the c runtime to avoid dependency on MSVCRXXX.dll
-        SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-        SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+      SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${COOLPROP_MSVC_REL}")
+	  SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${COOLPROP_MSVC_DBG}")
     endif()
   endif()
   
@@ -747,13 +960,10 @@ if (COOLPROP_JAVA_MODULE)
   endif()
   
   add_dependencies (${app_name} generate_headers)
-
-  # Remove the Example.java file so it doesn't get packaged in platform-independent zip file
-  file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/Example.java")
   
   add_custom_command(TARGET CoolProp
                      POST_BUILD
-                     COMMAND 7z a "${CMAKE_CURRENT_BINARY_DIR}/platform-independent.7z" "${CMAKE_CURRENT_BINARY_DIR}/*.java"
+                     COMMAND 7z a "${CMAKE_CURRENT_BINARY_DIR}/platform-independent.7z" "${CMAKE_CURRENT_BINARY_DIR}/*.java" -x!Example.java
                      WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
   add_custom_command(TARGET CoolProp
                      POST_BUILD
@@ -932,9 +1142,8 @@ if (COOLPROP_MATLAB_SWIGAUTOGENERATED)
   target_link_libraries(CoolProp_wrap ${MATLAB_LIBRARIES})
   
   if(WIN32) # 32-bit or 64-bit mex
-    # Force visual studio to statically link the c runtime to avoid dependency on MSVCRXXX.dll
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+    SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${COOLPROP_MSVC_REL}")
+	SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${COOLPROP_MSVC_DBG}")
     if (CMAKE_CL_64)
         SET_TARGET_PROPERTIES(CoolProp_wrap PROPERTIES PREFIX "" SUFFIX .mexw64)
     else()
@@ -1010,10 +1219,8 @@ if (COOLPROP_MATLAB_SWIG_MODULE)
                        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
   endif()
   if(WIN32) # 32-bit or 64-bit mex
-  
-    # Force visual studio to statically link the c runtime to avoid dependency on MSVCRXXX.dll
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+    SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${COOLPROP_MSVC_REL}")
+	SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${COOLPROP_MSVC_DBG}")
     
     if (CMAKE_CL_64)
         SET_TARGET_PROPERTIES(CoolPropMATLAB_wrap PROPERTIES PREFIX "" SUFFIX .mexw64)
@@ -1228,7 +1435,7 @@ if (COOLPROP_JAVASCRIPT_MODULE)
   set(CMAKE_EXE_LINKER_FLAGS "--bind --memory-init-file 1 -s ASSERTIONS=1 -s DISABLE_EXCEPTION_CATCHING=0 ")
   set(CMAKE_BUILD_TYPE Release)
   
-  list(APPEND APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/CoolPropLib.cpp")
+  list(APPEND APP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/CoolPropLib.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/emscripten_interface.cxx")
   include_directories(${APP_INCLUDE_DIRS})
   add_executable(coolprop ${APP_SOURCES})
   add_dependencies (coolprop generate_headers)
@@ -1241,9 +1448,8 @@ endif()
 if (COOLPROP_MATHEMATICA_MODULE)
 
     if (MSVC)
-      # Force visual studio to statically link the c runtime to avoid dependency on MSVCRXXX.dll
-      set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-      set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+	  SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${COOLPROP_MSVC_REL}")
+	  SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${COOLPROP_MSVC_DBG}")
     endif()
 
   set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/externals/FindMathematica/CMake/Mathematica/")

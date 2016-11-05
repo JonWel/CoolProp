@@ -6,13 +6,15 @@ Available Wrappers
 
 CoolProp at its core is a C++ library, but it can be of interest to use this code base from other programming environments.  For that reason, wrappers have been constructed for most of the programming languages of technical interest to allow users to seamlessly interface CoolProp and existing codebases.
 
+There are also installer packages availbale on the :ref:`page on installation packages <Installers>`.
+
 Downloads and instructions for each wrapper are included in the page for the wrapper given in the table below.
 
-======================================================= ===========================  =======================================
+======================================================= ===========================  =====================================================
 Target                                                  Operating Systems            Notes
-======================================================= ===========================  =======================================
+======================================================= ===========================  =====================================================
 :ref:`Static library <static_library>`                  linux, OSX, win
-:ref:`Shared library (DLL) <shared_library>`            linux, OSX, win
+:ref:`Shared library (DLL) <shared_library>`            linux, OSX, win              Included in the Windows :ref:`installer <Installers>`
 :ref:`Python <Python>`                                  linux, OSX, win              Wrapper is Cython based
 :ref:`Octave <Octave>`                                  linux, OSX, win              Wrapper is SWIG based
 :ref:`C# <Csharp>`                                      linux, OSX, win              Wrapper is SWIG based
@@ -26,18 +28,18 @@ Target                                                  Operating Systems       
 :ref:`PHP <PHP>`                                        linux, OSX, win              Mostly used on linux
 :ref:`Javascript <Javascript>`                          cross-platform               Works in all internet browsers
 :ref:`Labview <Labview>`                                windows only
-:ref:`Maple <Maple>`                                    linux, OSX, win
+:ref:`Maple <Maple>`                                    linux, OSX, win              CoolProp is included in Maple 2016
 :ref:`MathCAD <MathCAD>`                                windows only
 :ref:`SMath Studio <SMath>`                             linux, OSX, win
 :ref:`Mathematica <Mathematica>`
 :ref:`FORTRAN <FORTRAN>`                                linux, OSX, win
-:ref:`EES <EES>`                                        windows only
-:ref:`Microsoft Excel <Excel>`                          windows only
+:ref:`EES <EES>`                                        windows only                 Included in the Windows :ref:`installer <Installers>`
+:ref:`Microsoft Excel <Excel>`                          windows only                 Included in the Windows :ref:`installer <Installers>`
 :ref:`LibreOffice <LibreOffice>`                        windows, linux
 :ref:`Delphi & Lazarus <Delphi>`                        linux, OSX, win
 :ref:`iOS (iPhone) <ios>`                       
 :ref:`Android <Android>`                       
-======================================================= ===========================  =======================================
+======================================================= ===========================  =====================================================
 
 .. _wrapper_common_prereqs:
 
@@ -131,3 +133,4 @@ and explicitly typing "agree" before closing. Then you can use the compiler from
     DelphiLazarus/index.rst
     VB.net/index.rst
     R/index.rst
+    Installers/index.rst
